@@ -1,10 +1,9 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo, Suspense } from 'react';
 import VimeoPlayer from '@vimeo/player';
-import { useRouter, useParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { useAuth } from '@/contexts/AuthContext';
 import Navbar from '@/components/Navbar';
 import {
   Play,
@@ -15,19 +14,25 @@ import {
   Menu,
   X,
   BookOpen,
-  MessageCircle,
   Search
 } from 'lucide-react';
 import VIDEO_SOURCES_RAW from '@/data/video-sources.json';
+import {
+  LESSON_VIDEOS,
+  LESSON_CATEGORY_MAP,
+  LessonCategory,
+  LessonVideoEntry
+} from '@/data/lessons';
+import {
+  loadWatchHistory,
+  saveWatchEntry,
+  loadCompletedLessons,
+  saveCompletedLessons,
+  saveLastLesson,
+  WatchEntry,
+  WatchHistory
+} from '@/lib/localProgress';
 
-// ============================================================
-// MIGRATION MODE
-// Set to `true`  → students see the migration announcement only.
-// Set to `false` → full lesson interface is restored.
-// ============================================================
-const MIGRATION_MODE = true;
-
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
 const CLOUDINARY_CLOUD_NAME = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME || 'dwcxvaswf';
 const R2_ACCOUNT_ID = '6979f6d58b951631b6a5585a10376a27';
 const R2_BUCKET = 'darwin-videos';
@@ -37,10 +42,10 @@ const R2_LESSONS_BASE_URL =
 
 // Debug: Log Cloudinary config
 if (typeof window !== 'undefined') {
-  console.log('Ã°Å¸Å½Â¬ Video Config:', { CLOUDINARY_CLOUD_NAME, R2_BUCKET });
-  console.log('Ã°Å¸Å½Â¥ R2 Lessons Base URL:', R2_LESSONS_BASE_URL);
+  console.log('🔬 Video Config:', { CLOUDINARY_CLOUD_NAME, R2_BUCKET });
+  console.log('🔭 R2 Lessons Base URL:', R2_LESSONS_BASE_URL);
   if (!process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME) {
-    console.warn('Ã¢Å¡Â Ã¯Â¸Â NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME is not set. Falling back to default cloud name; set it in your hosting env to avoid surprises.');
+    console.warn('⚠️ NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME is not set. Falling back to default cloud name; set it in your hosting env to avoid surprises.');
   }
 }
 
@@ -49,8 +54,8 @@ if (typeof window !== 'undefined') {
 // See R2_CORS_SETUP.md for instructions to enable R2 public access
 const normalizeFilenameKey = (value: string) =>
   value
-    .replace(/[Ã¢â‚¬â„¢Ã¢â‚¬Ëœ]/g, "'")
-    .replace(/[Ã¢â‚¬Å“Ã¢â‚¬Â]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .replace(/[“”]/g, '"')
     .trim();
 
 const VIDEO_SOURCES: Record<string, 'cloudinary' | 'r2'> = Object.fromEntries(
@@ -63,7 +68,6 @@ const VIDEO_SOURCES: Record<string, 'cloudinary' | 'r2'> = Object.fromEntries(
 // No longer using R2 - all videos are on Cloudinary with direct URLs in videoUrlOverride
 const LESSON_VIDEO_URL_OVERRIDES: Record<string, string> = {};
 
-
 type BgmFile = {
   id: number;
   name: string;
@@ -72,7 +76,7 @@ type BgmFile = {
 
 // BGM and SFX files served locally from public/bgm-and-sfx
 const BGM_FILES: BgmFile[] = [
-  { id: 1, name: 'Ace of Base - All That She Wants', url: '/bgm-and-sfx/Ace of Base Ã°Å¸Å½Â¼ All That She Wants.mp3' },
+  { id: 1, name: 'Ace of Base - All That She Wants', url: '/bgm-and-sfx/Ace of Base 🎼 All That She Wants.mp3' },
   { id: 2, name: 'Else Paris', url: '/bgm-and-sfx/Else Paris.mp3' },
   { id: 3, name: 'Heaven Sent', url: '/bgm-and-sfx/Heaven Sent .mp3' },
   { id: 4, name: 'hell shee', url: '/bgm-and-sfx/hell shee.mp3' },
@@ -90,385 +94,12 @@ const BGM_FILES: BgmFile[] = [
   { id: 16, name: 'Transgender', url: '/bgm-and-sfx/Transgender.mp3' },
 ];
 
-type LessonCategory = 'ALL' | 'LEARN' | 'FREE WAY' | 'PAID AI' | 'HACKS' | 'CREATE' | 'HISTORY';
-
-type LessonVideoEntry = {
-  id: number;
-  title: string;
-  filename: string;
-  duration: number;
-  thumbnail: string | null;
-  category?: LessonCategory;
-  youtubeEmbedUrl?: string;
-  vimeoId?: string;
-  videoUrlOverride?: string;
-  resources?: {
-    title: string;
-    url: string;
-  }[];
-  externalLinkTitle?: string;
-  externalLinkUrl?: string;
-  externalLinks?: {
-    title: string;
-    url: string;
-  }[];
-};
-
-// Lesson videos â€” ordered per course curriculum
-const LESSON_VIDEOS: LessonVideoEntry[] = [
-  // 0
-  {
-    id: 110,
-    title: 'Introduction Video',
-    filename: 'Introduction Video.mp4',
-    duration: 10,
-    thumbnail: '/thumbnails/introduction-video.png',
-    vimeoId: '1193122511?h=171c0b7404',
-  },
-  // 1
-  {
-    id: 101,
-    title: 'FACEBOOK FACELESS',
-    filename: 'FACEBOOK FACELESS.mp4',
-    duration: 12,
-    thumbnail: '/thumbnails/facebook-faceless.png',
-    vimeoId: '1192460249?h=a872a340d9',
-  },
-  // 2
-  {
-    id: 3,
-    title: 'Niches That Print Money',
-    filename: 'Niches That Print Money.mp4',
-    duration: 15,
-    thumbnail: '/thumbnails/niches-that-print-money.png',
-    vimeoId: '1186114388',
-  },
-  // 3
-  {
-    id: 102,
-    title: 'NICHE AND STYLE',
-    filename: 'NICHE AND STYLE.mp4',
-    duration: 12,
-    thumbnail: '/thumbnails/niche-and-style.png',
-    vimeoId: '1192460255?h=fc32eb57ce',
-    resources: [{ title: 'NICHES & STYLE', url: '/files/NICHES AND STYLE.pdf' }],
-  },
-  // 4
-  {
-    id: 103,
-    title: 'HOW TO TARGET US AUDIENCE',
-    filename: 'HOW TO TARGET US AUDIENCE.mp4',
-    duration: 12,
-    thumbnail: '/thumbnails/how-to-target-us-audience.png',
-    vimeoId: '1192460266?h=33bc3c5c00',
-    resources: [{ title: 'How to Target US Audience', url: '/files/def.pdf' }],
-  },
-  // 5
-  {
-    id: 105,
-    title: 'FB SET UP AND PAGE SET UP',
-    filename: 'FB SET UP AND PAGE SET UP.mp4',
-    duration: 12,
-    thumbnail: '/thumbnails/fb-set-up-and-page-set-up.png',
-    vimeoId: '1192460383?h=aea5136aec',
-    resources: [{ title: 'PROMPT', url: '/files/PROMPT.pdf' }],
-  },
-  // 6
-  {
-    id: 106,
-    title: 'AI Generated Policies',
-    filename: 'AI Generated Policies.mp4',
-    duration: 12,
-    thumbnail: '/thumbnails/ai-generated-policies.png',
-    vimeoId: '1192461093?h=c5dab1dfbf',
-    resources: [{ title: 'AI Generated Policies', url: '/files/AI generated Policies.jpg' }],
-  },
-  // 7
-  {
-    id: 4,
-    title: 'How to Go Viral on Facebook Page',
-    filename: 'HOW TO GO VIRAL ON FACEBOOK PAGE.mp4',
-    duration: 15,
-    thumbnail: '/thumbnails/how-to-go-viral-on-facebook.png',
-    vimeoId: '1186114435',
-  },
-  // 8
-  {
-    id: 7,
-    title: 'Organic Growth How to Gain Followers Fast',
-    filename: 'Organic Growth How to Gain Followers Fast.mp4',
-    duration: 15,
-    thumbnail: '/thumbnails/organic-growth-how-to-gain-followers-fast.png',
-    vimeoId: '1186114872',
-  },
-  // 9
-  {
-    id: 35,
-    title: "LET'S TALK ABOUT MONETIZATION",
-    filename: "LET'S TALK ABOUT MONETIZATION.mp4",
-    duration: 12,
-    thumbnail: '/thumbnails/lets-talk-about-monetization.png',
-    vimeoId: '1186114930',
-    externalLinks: [
-      { title: 'How to Apply for Digital TIN ID Using ORUS', url: 'https://youtu.be/YcuU-unmryA?si=aFsSfDsICWTICDCb' },
-      { title: 'HOW TO SET UP', url: 'https://youtu.be/4R3EWyVhKM0?si=z_Var33jyZ7E9dxT' },
-    ],
-    resources: [{ title: "LET'S TALK ABOUT MONETIZATION", url: "/files/LET'S TALK ABOUT MONETIZATION.pdf" }],
-  },
-  // 10
-  {
-    id: 38,
-    title: 'Avoiding Violations (Fix & Prevent)',
-    filename: 'Avoiding Violations (Fix & Prevent).mp4',
-    duration: 12,
-    thumbnail: '/thumbnails/avoiding-violations.png',
-    vimeoId: '1186722240',
-    resources: [{ title: 'Facebook Violations Guide', url: '/files/FACEBOOK VIOLATIONS GUIDE.pdf' }],
-  },
-  // 11
-  {
-    id: 37,
-    title: 'AI Tools for Faceless Content',
-    filename: 'AI Tools for Faceless Content.mp4',
-    duration: 12,
-    thumbnail: '/thumbnails/ai-tools-for-faceless-content.png',
-    vimeoId: '1186722144',
-    resources: [{ title: 'AI Tools for Faceless Content', url: '/files/AI Tools for Faceless Content.pdf' }],
-  },
-  // 12
-  {
-    id: 34,
-    title: 'RESTRICT A SPECIFIC COUNTRY',
-    filename: 'RESTRICT A SPECIFIC COUNTRY.mp4',
-    duration: 12,
-    thumbnail: '/thumbnails/restrict-a-specific-country.png',
-    vimeoId: '1186115214',
-  },
-  // 13
-  {
-    id: 10,
-    title: 'HOW TO USE CAPCUT',
-    filename: 'HOW TO USE CAPCUT.mp4',
-    duration: 12,
-    thumbnail: '/thumbnails/how-to-use-capcut.png',
-    vimeoId: '1186115127',
-  },
-  // 14
-  {
-    id: 11,
-    title: 'PC CapCut Bypass',
-    filename: 'pc capcut bypass.mp4',
-    duration: 15,
-    thumbnail: '/thumbnails/pc-capcut-pro-bypass.png',
-    vimeoId: '1186115654',
-  },
-  // 15
-  {
-    id: 36,
-    title: 'Free Capcut Pro',
-    filename: 'Free Capcut Pro.mp4',
-    duration: 10,
-    thumbnail: '/thumbnails/free-capcut-pro.png',
-    vimeoId: '1186115378',
-    externalLinks: [{ title: 'Join Telegram Access', url: 'https://t.me/+XVXDbe5gwaZhMWE1' }],
-  },
-  // 16
-  {
-    id: 32,
-    title: 'INTRODUCING STREVIO',
-    filename: 'INTRODUCING STREVIO.mp4',
-    duration: 12,
-    thumbnail: '/thumbnails/introducing-strevio.png',
-    vimeoId: '1186118016',
-    externalLinkTitle: 'Open Strevio',
-    externalLinkUrl: 'https://strevio.com/',
-  },
-  // 17
-  {
-    id: 12,
-    title: 'Saan I-Download ang Nakuhang Content na 1080P',
-    filename: '16. SAAN I-DOWNLOAD ANG NAKUHANG CONTENT NA 1080P.mp4',
-    duration: 10,
-    thumbnail: '/thumbnails/saan-i-download-ang-nakuhang-clip-1080p.png',
-    vimeoId: '1186115684',
-  },
-  // 18
-  {
-    id: 14,
-    title: 'Create Content with Free Tools',
-    filename: 'Create Content with Free Tools.mp4',
-    duration: 15,
-    thumbnail: '/thumbnails/create-content-with-free-tools.png',
-    vimeoId: '1192776348?h=a609129ccc',
-    resources: [{ title: 'Create Content with Free Tools', url: '/files/fruits.pdf' }],
-  },
-  // 19
-  {
-    id: 15,
-    title: 'FACELESS FARM CONTENT GUIDE',
-    filename: 'FACLESS FARM CONTENT GUIDE.mp4',
-    duration: 12,
-    thumbnail: '/thumbnails/faceless-farm-content.png',
-    vimeoId: '1186116116',
-    resources: [{ title: 'FACELESS FARM CONTENT GUIDE', url: '/files/FACELESS FARM CONTENT GUIDE.pdf' }],
-  },
-  // 20
-  {
-    id: 16,
-    title: 'HOW TO AVOID COPYRIGHT STRIKES',
-    filename: 'LESSON 5. VID EDITING BY MY VID EDITOR.mp4',
-    duration: 20,
-    thumbnail: '/thumbnails/how-to-avoid-copyright-strikes.png',
-    vimeoId: '1186116343',
-  },
-  // 21
-  {
-    id: 20,
-    title: 'From Basic to Advanced Image Creation',
-    filename: 'From Basic to Advanced Image Creation.mp4',
-    duration: 15,
-    thumbnail: '/thumbnails/from-basic-to-advanced-image-creation.png',
-    vimeoId: '1186116467',
-    resources: [{ title: 'Photo prompt', url: '/files/Photo prompt.pdf' }],
-    externalLinks: [{ title: 'Canva Team Invite', url: 'https://www.canva.com/brand/join?token=BoSL0_UUUKhZIp5EuDhIYw&referrer=team-invite' }],
-  },
-  // 22
-  {
-    id: 19,
-    title: 'Paano Ako Kumita ng 6 Digits sa Story',
-    filename: 'Paano Ako Kumita ng 6 Digits sa Story.mp4',
-    duration: 22,
-    thumbnail: '/thumbnails/paano-ako-kumita-ng-6-digits-sa-story.png',
-    vimeoId: '1186116432',
-  },
-  // 23
-  {
-    id: 30,
-    title: 'How to Setup Payhip Store for your digital products',
-    filename: 'Lesson 26. How to Setup Payhip Store for your digital products.mp4',
-    duration: 15,
-    thumbnail: '/thumbnails/how-to-setup-payhip-store.png',
-    videoUrlOverride: 'https://vwpbdtglrkgmxuprtgpk.supabase.co/storage/v1/object/public/Pislis/Lesson%2026.%20How%20to%20Setup%20Payhip%20Store%20for%20your%20digital%20products.mp4',
-    externalLinks: [{ title: 'PAYHIP STORE SET UP', url: 'https://youtu.be/V_fDDWyaMcg?si=Jzes_A2gjvGFdNPS' }],
-  },
-  // 24
-  {
-    id: 108,
-    title: 'COMMON QUESTION',
-    filename: 'COMMON QUESTION.mp4',
-    duration: 12,
-    thumbnail: '/thumbnails/common-question.png',
-    vimeoId: '1192464311?h=cf68c13f3c',
-  },
-  // 25
-  {
-    id: 104,
-    title: '3D Animation Style & General Niche',
-    filename: '3D Animation Style & General Niche.mp4',
-    duration: 12,
-    thumbnail: '/thumbnails/3d-animation-style-and-general-niche.png',
-    vimeoId: '1192460265?h=395d9910fc',
-    resources: [
-      { title: '3D Animation Prompt', url: '/files/3D Animation Prompt.pdf' },
-      { title: 'Fundamentals of Reels Animation', url: '/files/Fundamentals of Reels Animation.pdf' },
-    ],
-  },
-  // 26
-  {
-    id: 107,
-    title: 'SKELETON STYLE',
-    filename: 'SKELETON STYLE.mp4',
-    duration: 12,
-    thumbnail: '/thumbnails/skeleton-style.png',
-    vimeoId: '1192464047?h=6e80cbe423',
-    resources: [
-      { title: 'SKELETON STRUCTURE PROMPT', url: '/files/SKELETON STRUCTURE PROMPT.pdf' },
-      { title: 'SKELETON WORKFLOW', url: '/files/SKELETON WORKFLOW.pdf' },
-    ],
-  },
-  // 27
-  {
-    id: 29,
-    title: 'Awareness!!',
-    filename: '21. Awareness!!.mp4',
-    duration: 12,
-    thumbnail: '/thumbnails/awareness.png',
-    vimeoId: '1186117734',
-  },
-  // 28
-  {
-    id: 109,
-    title: 'FACELESS NICHE',
-    filename: 'FACELESS NICHE.mp4',
-    duration: 12,
-    thumbnail: '/thumbnails/faceless-niche.png',
-    vimeoId: '1192868079?h=5d598cfb29',
-    resources: [{ title: 'Remedies', url: '/files/Remedies.pdf' }],
-  },
-  // 29
-  {
-    id: 111,
-    title: 'FREE AI IMAGE TO VIDEO TOOLS',
-    filename: 'FREE AI IMAGE TO VIDEO TOOLS.mp4',
-    duration: 12,
-    thumbnail: '/thumbnails/free-ai-image-to-video-tools.png',
-    vimeoId: '1194270854?h=c32fbd7a84',
-    resources: [{ title: 'FREE AI TOOLS FOR IMAGE TO VIDEO', url: '/files/FREE AI TOOLS FOR IMAGE TO VIDEO.pdf' }],
-  },
-];
-
-// Maps lesson ID â†’ category
-const LESSON_CATEGORY_MAP: Record<number, LessonCategory> = {
-  // LEARN
-  110: 'LEARN', // Introduction Video
-  101: 'LEARN', // FACEBOOK FACELESS
-  3:   'LEARN', // Niches That Print Money
-  102: 'LEARN', // NICHE AND STYLE
-  103: 'LEARN', // HOW TO TARGET US AUDIENCE
-  106: 'LEARN', // AI Generated Policies
-  4:   'LEARN', // How to Go Viral on Facebook Page
-  7:   'LEARN', // Organic Growth How to Gain Followers Fast
-  35:  'LEARN', // LET'S TALK ABOUT MONETIZATION
-  38:  'LEARN', // Avoiding Violations (Fix & Prevent)
-  37:  'LEARN', // AI Tools for Faceless Content
-  10:  'LEARN', // HOW TO USE CAPCUT
-  12:  'LEARN', // Saan I-Download ang Nakuhang Content na 1080P
-  30:  'LEARN', // How to Setup Payhip Store
-  108: 'LEARN', // COMMON QUESTION
-  29:  'LEARN', // Awareness!!
-  // HACKS
-  34:  'HACKS', // RESTRICT A SPECIFIC COUNTRY
-  11:  'HACKS', // PC CapCut Bypass
-  36:  'HACKS', // Free Capcut Pro
-  32:  'HACKS', // INTRODUCING STREVIO
-  19:  'HACKS', // Paano Ako Kumita ng 6 Digits sa Story
-  // FREE WAY
-  14:  'FREE WAY', // Create Content with Free Tools
-  15:  'FREE WAY', // FACELESS FARM CONTENT GUIDE
-  16:  'FREE WAY', // HOW TO AVOID COPYRIGHT STRIKES
-  20:  'FREE WAY', // From Basic to Advanced Image Creation
-  111: 'FREE WAY', // FREE AI IMAGE TO VIDEO TOOLS
-  // PAID AI
-  104: 'PAID AI', // 3D Animation Style & General Niche
-  107: 'PAID AI', // SKELETON STYLE
-  109: 'PAID AI', // FACELESS NICHE
-  // CREATE
-  105: 'CREATE',  // FB SET UP AND PAGE SET UP
-};
-
 const getLessonR2VideoUrl = (filename: string, variant: 'lessons' | 'root') => {
   const base = R2_LESSONS_BASE_URL.replace(/\/+$/g, '');
   const encoded = encodeURIComponent(filename);
   const url = variant === 'root' ? `${base}/${encoded}` : `${base}/lessons/${encoded}`;
   console.log('R2 Video URL:', url);
   return url;
-};
-
-// Manual overrides for lesson content videos when a public URL is available
-const LESSON_CONTENT_OVERRIDES: Record<string, string> = {
-  // Map the lesson title (exact match) to a public video URL
-  'Another Tips Final': 'https://pub-79bbe5625f3e4375a961f7bf776b47c8.r2.dev/lessons/12.%20another%20tips%20final.mp4',
-  'Video Editing by My Video Editor': 'https://pub-79bbe5625f3e4375a961f7bf776b47c8.r2.dev/lessons/LESSON%205.%20VID%20EDITING%20BY%20MY%20VID%20EDITOR.mp4',
 };
 
 const getLessonCloudinaryVideoUrl = (filename: string) => {
@@ -483,7 +114,7 @@ const getLessonCloudinaryVideoUrl = (filename: string) => {
     PUBLIC_ID_OVERRIDES[filename] ??
     filenameWithoutExt
       .replace(/ /g, '_')
-      .replace(/[Ã¢â‚¬â„¢']/g, '')
+      .replace(/[’']/g, '')
       .replace(/\u2019/g, '');
 
   const encodedPublicId = encodeURIComponent(rawPublicId);
@@ -531,66 +162,9 @@ const getLessonVideoUrl = (
   return getLessonCloudinaryVideoUrl(normalizedFilename);
 };
 
+function CourseLearnPageContent() {
+  const searchParams = useSearchParams();
 
-
-interface Lesson {
-  id: string;
-  title: string;
-  content: string;
-  video_url: string | null;
-  order_index: number;
-  duration_minutes: number;
-  lesson_type: string;
-  resources: Record<string, string>[] | null;
-}
-
-interface Module {
-  id: string;
-  title: string;
-  description: string;
-  order_index: number;
-  duration_minutes: number;
-  course_lessons: Lesson[];
-}
-
-interface Course {
-  id: string;
-  slug: string;
-  title: string;
-  description: string;
-  duration_hours: number;
-  course_modules: Module[];
-}
-
-interface Progress {
-  [lessonId: string]: {
-    completed: boolean;
-    progress_percent: number;
-    last_position: number;
-  };
-}
-
-interface Enrollment {
-  id: string;
-  status: string;
-  created_at: string;
-  expires_at: string | null;
-}
-
-export default function CourseLearnPage() {
-  const router = useRouter();
-  const params = useParams();
-  const slug = params?.slug as string;
-  const { user, token, isLoading: authLoading, isAuthenticated } = useAuth();
-
-  const [course, setCourse] = useState<Course | null>(null);
-  const [progress, setProgress] = useState<Progress>({});
-  const [enrollment, setEnrollment] = useState<Enrollment | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [notEnrolled, setNotEnrolled] = useState(false);
-
-  const [currentLesson, setCurrentLesson] = useState<Lesson | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [activeTab, setActiveTab] = useState<'lessons' | 'files' | 'bgm' | 'webinar'>('lessons');
   const [searchQuery, setSearchQuery] = useState('');
@@ -604,7 +178,7 @@ export default function CourseLearnPage() {
   const bgmAudioRef = useRef<HTMLAudioElement | null>(null);
 
   // Lesson video states
-  const [currentVideoLesson, setCurrentVideoLesson] = useState<typeof LESSON_VIDEOS[0] | null>(null);
+  const [currentVideoLesson, setCurrentVideoLesson] = useState<LessonVideoEntry | null>(null);
   const [completedLessons, setCompletedLessons] = useState<Set<number>>(new Set<number>());
   const [lessonCategory, setLessonCategory] = useState<LessonCategory>('ALL');
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -616,50 +190,10 @@ export default function CourseLearnPage() {
   const [lessonVideoFallbackAttempts, setLessonVideoFallbackAttempts] = useState(0);
   const [lessonVideoRetryCount, setLessonVideoRetryCount] = useState(0);
 
-  // ---- Watch History ----
-  type WatchEntry = {
-    title: string;
-    thumbnail: string | null;
-    currentTime: number;
-    duration: number;
-    lastWatchedAt: number;
-  };
-  type WatchHistory = Record<string, WatchEntry>;
-
-  const HISTORY_KEY = `ffm_watch_history_${user?.id ?? 'guest'}`;
-
-  const [watchHistory, setWatchHistory] = useState<WatchHistory>(() => {
-    if (typeof window === 'undefined') return {};
-    try {
-      return JSON.parse(localStorage.getItem(`ffm_watch_history_${user?.id ?? 'guest'}`) || '{}');
-    } catch { return {}; }
-  });
-
-  // Re-read from localStorage when user changes (login)
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    try {
-      const key = `ffm_watch_history_${user?.id ?? 'guest'}`;
-      setWatchHistory(JSON.parse(localStorage.getItem(key) || '{}'));
-    } catch { setWatchHistory({}); }
-  }, [user?.id]);
-
-  const saveWatchProgress = useCallback((lesson: typeof LESSON_VIDEOS[0], currentTime: number, duration: number) => {
-    if (!lesson) return;
-    const key = `ffm_watch_history_${user?.id ?? 'guest'}`;
-    const entry: WatchEntry = {
-      title: lesson.title,
-      thumbnail: lesson.thumbnail ?? null,
-      currentTime,
-      duration,
-      lastWatchedAt: Date.now(),
-    };
-    setWatchHistory(prev => {
-      const next = { ...prev, [String(lesson.id)]: entry };
-      try { localStorage.setItem(key, JSON.stringify(next)); } catch { }
-      return next;
-    });
-  }, [user?.id]);
+  // ---- Watch History (localStorage, no account needed) ----
+  // Initialized empty to keep the server HTML and first client render in
+  // sync; real history is loaded in the mount effect below.
+  const [watchHistory, setWatchHistory] = useState<WatchHistory>({});
 
   function timeAgo(timestamp: number): string {
     const seconds = Math.floor((Date.now() - timestamp) / 1000);
@@ -671,127 +205,55 @@ export default function CourseLearnPage() {
     if (minutes > 0) return `${minutes} minute${minutes > 1 ? 's' : ''} ago`;
     return 'Just now';
   }
-  // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
-  // Comments state
-  const [comments, setComments] = useState<any[]>([]);
-  const [commentsLoading, setCommentsLoading] = useState(false);
-  const [commentInput, setCommentInput] = useState('');
-  const [commentSubmitting, setCommentSubmitting] = useState(false);
-  const [commentError, setCommentError] = useState<string | null>(null);
-  // replyTo: { id, name }
-  const [replyTo, setReplyTo] = useState<{ id: string; name: string } | null>(null);
-  const [replyInput, setReplyInput] = useState('');
-  const [replySubmitting, setReplySubmitting] = useState(false);
-  // editId: the comment being edited
-  const [editId, setEditId] = useState<string | null>(null);
-  const [editInput, setEditInput] = useState('');
-  const [editSubmitting, setEditSubmitting] = useState(false);
-  // reactions picker open for which comment
-  const [reactPickerFor, setReactPickerFor] = useState<string | null>(null);
-
-  const EMOJIS = ['Ã°Å¸â€˜Â', 'Ã¢ÂÂ¤Ã¯Â¸Â', 'Ã°Å¸Ëœâ€š', 'Ã°Å¸ËœÂ®', 'Ã°Å¸â€Â¥', 'Ã°Å¸â„¢Â'];
-
-  // Fetch comments when lesson changes
+  // Load local progress on mount
   useEffect(() => {
-    if (!currentVideoLesson || !token) return;
-    setCommentsLoading(true);
-    setComments([]);
-    fetch(`${API_BASE_URL}/comments/${currentVideoLesson.id}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then(res => res.json())
-      .then(data => setComments(data.comments || []))
-      .catch(() => { })
-      .finally(() => setCommentsLoading(false));
-  }, [currentVideoLesson, token]);
+    setWatchHistory(loadWatchHistory());
+    setCompletedLessons(loadCompletedLessons());
 
-  const submitComment = async () => {
-    if (!commentInput.trim() || commentSubmitting || !token || !currentVideoLesson) return;
-    setCommentSubmitting(true);
-    setCommentError(null);
-    try {
-      const res = await fetch(`${API_BASE_URL}/comments/${currentVideoLesson.id}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ content: commentInput.trim() }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to post comment');
-      setComments(prev => [...prev, data.comment]);
-      setCommentInput('');
-    } catch (err: any) {
-      setCommentError(err.message || 'Failed to post comment');
-    } finally {
-      setCommentSubmitting(false);
+    // Resume a specific lesson when opened via ?lesson=<id>
+    const lessonParam = searchParams.get('lesson');
+    if (lessonParam) {
+      const found = LESSON_VIDEOS.find(l => String(l.id) === lessonParam);
+      if (found) openLesson(found);
     }
-  };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  const submitReply = async () => {
-    if (!replyInput.trim() || replySubmitting || !token || !currentVideoLesson || !replyTo) return;
-    setReplySubmitting(true);
-    try {
-      const res = await fetch(`${API_BASE_URL}/comments/${currentVideoLesson.id}/reply/${replyTo.id}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ content: replyInput.trim() }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      setComments(prev => [...prev, data.comment]);
-      setReplyInput('');
-      setReplyTo(null);
-    } catch { }
-    finally { setReplySubmitting(false); }
-  };
-
-  const submitEdit = async (commentId: string) => {
-    if (!editInput.trim() || editSubmitting || !token) return;
-    setEditSubmitting(true);
-    try {
-      const res = await fetch(`${API_BASE_URL}/comments/${commentId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ content: editInput.trim() }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      setComments(prev => prev.map(c => c.id === commentId ? { ...c, content: data.comment.content, edited: true } : c));
-      setEditId(null);
-      setEditInput('');
-    } catch { }
-    finally { setEditSubmitting(false); }
-  };
-
-  const deleteComment = async (commentId: string) => {
-    if (!token) return;
-    const res = await fetch(`${API_BASE_URL}/comments/${commentId}`, {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${token}` },
+  // Open a lesson and remember it as the last opened lesson
+  const openLesson = useCallback((lesson: LessonVideoEntry) => {
+    setCurrentVideoLesson(lesson);
+    saveLastLesson({
+      id: lesson.id,
+      title: lesson.title,
+      thumbnail: lesson.thumbnail,
+      openedAt: Date.now(),
     });
-    if (res.ok) setComments(prev => prev.filter(c => c.id !== commentId && c.parent_id !== commentId));
-  };
+  }, []);
 
-  const toggleReaction = async (commentId: string, emoji: string) => {
-    if (!token) return;
-    setReactPickerFor(null);
-    // Optimistic update
-    setComments(prev => prev.map(c => {
-      if (c.id !== commentId) return c;
-      const reactions: any[] = c.reactions || [];
-      const existing = reactions.find((r: any) => r.emoji === emoji && r.user_id === user?.id);
-      if (existing) {
-        return { ...c, reactions: reactions.filter((r: any) => !(r.emoji === emoji && r.user_id === user?.id)) };
-      } else {
-        return { ...c, reactions: [...reactions, { id: 'temp', comment_id: commentId, user_id: user?.id, emoji }] };
-      }
-    }));
-    await fetch(`${API_BASE_URL}/comments/${commentId}/react`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ emoji }),
+  const saveWatchProgress = useCallback((lesson: LessonVideoEntry, currentTime: number, duration: number) => {
+    if (!lesson) return;
+    const entry: WatchEntry = {
+      title: lesson.title,
+      thumbnail: lesson.thumbnail ?? null,
+      currentTime,
+      duration,
+      lastWatchedAt: Date.now(),
+    };
+    saveWatchEntry(lesson.id, entry);
+    setWatchHistory(prev => ({ ...prev, [String(lesson.id)]: entry }));
+  }, []);
+
+  // Mark a lesson as completed (localStorage)
+  const markCompleted = useCallback((lesson: LessonVideoEntry) => {
+    setCompletedLessons(prev => {
+      if (prev.has(lesson.id)) return prev;
+      const next = new Set(prev);
+      next.add(lesson.id);
+      saveCompletedLessons(next);
+      return next;
     });
-  };
+  }, []);
 
   // When the current lesson changes, reset source to preferred (VIDEO_SOURCES or Cloudinary)
   useEffect(() => {
@@ -823,12 +285,11 @@ export default function CourseLearnPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentVideoLesson]);
 
-  // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Vimeo Player: resume + progress save Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+  // “““ Vimeo Player: resume + progress save “““
   useEffect(() => {
     if (!currentVideoLesson?.vimeoId || !iframeRef.current) return;
 
     const player = new VimeoPlayer(iframeRef.current);
-    const key = `ffm_watch_history_${user?.id ?? 'guest'}`;
     const saved = watchHistory[String(currentVideoLesson.id)];
 
     // Resume from saved position once the player is ready
@@ -846,48 +307,49 @@ export default function CourseLearnPage() {
     // Save progress on every timeupdate tick
     const handleTimeUpdate = ({ seconds, duration }: { seconds: number; duration: number }) => {
       if (seconds < 5 || !duration) return;
-      const entry = {
+      const entry: WatchEntry = {
         title: currentVideoLesson.title,
         thumbnail: currentVideoLesson.thumbnail ?? null,
         currentTime: seconds,
         duration,
         lastWatchedAt: Date.now(),
       };
-      setWatchHistory(prev => {
-        const next = { ...prev, [String(currentVideoLesson.id)]: entry };
-        try { localStorage.setItem(key, JSON.stringify(next)); } catch { }
-        return next;
-      });
+      saveWatchEntry(currentVideoLesson.id, entry);
+      setWatchHistory(prev => ({ ...prev, [String(currentVideoLesson.id)]: entry }));
     };
 
     // Also save on pause
     const handlePause = ({ seconds, duration }: { seconds: number; duration: number }) => {
       if (seconds < 5 || !duration) return;
-      const entry = {
+      const entry: WatchEntry = {
         title: currentVideoLesson.title,
         thumbnail: currentVideoLesson.thumbnail ?? null,
         currentTime: seconds,
         duration,
         lastWatchedAt: Date.now(),
       };
-      setWatchHistory(prev => {
-        const next = { ...prev, [String(currentVideoLesson.id)]: entry };
-        try { localStorage.setItem(key, JSON.stringify(next)); } catch { }
-        return next;
-      });
+      saveWatchEntry(currentVideoLesson.id, entry);
+      setWatchHistory(prev => ({ ...prev, [String(currentVideoLesson.id)]: entry }));
+    };
+
+    // Mark lesson complete when the video ends
+    const handleEnded = () => {
+      markCompleted(currentVideoLesson);
     };
 
     player.on('timeupdate', handleTimeUpdate);
     player.on('pause', handlePause);
+    player.on('ended', handleEnded);
 
     return () => {
       player.off('timeupdate', handleTimeUpdate);
       player.off('pause', handlePause);
+      player.off('ended', handleEnded);
       player.destroy().catch(() => { });
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentVideoLesson]);
-  // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+  // ““““““““““““““““““““““““““““““““““““““““““““““““““““““““““““
 
   // Scroll to top of lesson content whenever the lesson changes
   useEffect(() => {
@@ -902,8 +364,9 @@ export default function CourseLearnPage() {
   // All lessons are immediately accessible
   const isLessonUnlocked = (_lessonId: number) => true;
 
-  // eslint-disable-next-line @typescript-eslint/no-empty-function
-  const handleVideoEnded = () => { };
+  const handleVideoEnded = () => {
+    if (currentVideoLesson) markCompleted(currentVideoLesson);
+  };
 
   // Filtered lessons for the category grid (includes HISTORY)
   const filteredLessons = useMemo(() => {
@@ -929,25 +392,20 @@ export default function CourseLearnPage() {
     const handleUnload = () => {
       const v = videoRef.current;
       if (v && currentVideoLesson && v.duration && v.currentTime > 0) {
-        const key = `ffm_watch_history_${user?.id ?? 'guest'}`;
-        try {
-          const existing = JSON.parse(localStorage.getItem(key) || '{}');
-          existing[String(currentVideoLesson.id)] = {
-            title: currentVideoLesson.title,
-            thumbnail: currentVideoLesson.thumbnail ?? null,
-            currentTime: v.currentTime,
-            duration: v.duration,
-            lastWatchedAt: Date.now(),
-          };
-          localStorage.setItem(key, JSON.stringify(existing));
-        } catch { }
+        saveWatchEntry(currentVideoLesson.id, {
+          title: currentVideoLesson.title,
+          thumbnail: currentVideoLesson.thumbnail ?? null,
+          currentTime: v.currentTime,
+          duration: v.duration,
+          lastWatchedAt: Date.now(),
+        });
       }
     };
     window.addEventListener('beforeunload', handleUnload);
     return () => window.removeEventListener('beforeunload', handleUnload);
-  }, [currentVideoLesson, user?.id]);
+  }, [currentVideoLesson]);
 
-  // Navigate to next lesson Ã¢â‚¬â€ respects filteredLessons so category/search context is honoured
+  // Navigate to next lesson — respects filteredLessons so category/search context is honoured
   const goToNextVideoLesson = () => {
     if (!currentVideoLesson) return;
     const currentIndex = filteredLessons.findIndex(l => l.id === currentVideoLesson.id);
@@ -955,17 +413,17 @@ export default function CourseLearnPage() {
       ? filteredLessons[currentIndex + 1]
       : null;
     if (nextLesson && isLessonUnlocked(nextLesson.id)) {
-      setCurrentVideoLesson(nextLesson);
+      openLesson(nextLesson);
     }
   };
 
-  // Navigate to previous lesson Ã¢â‚¬â€ respects filteredLessons so category/search context is honoured
+  // Navigate to previous lesson — respects filteredLessons so category/search context is honoured
   const goToPrevVideoLesson = () => {
     if (!currentVideoLesson) return;
     const currentIndex = filteredLessons.findIndex(l => l.id === currentVideoLesson.id);
     const prevLesson = currentIndex > 0 ? filteredLessons[currentIndex - 1] : null;
     if (prevLesson) {
-      setCurrentVideoLesson(prevLesson);
+      openLesson(prevLesson);
     }
   };
 
@@ -975,7 +433,6 @@ export default function CourseLearnPage() {
     : -1;
   const isFirstLesson = currentVideoIndex === 0;
   const isLastLesson = currentVideoIndex === filteredLessons.length - 1;
-
 
   // Fetch files when tab becomes active
   useEffect(() => {
@@ -1051,357 +508,6 @@ export default function CourseLearnPage() {
     }
   }, [activeTab]);
 
-
-  // First, get course ID from slug, then fetch content
-  const fetchCourseContent = useCallback(async () => {
-    if (!token || !slug) return;
-
-    try {
-      // First get course info by slug to get the ID
-      const slugResponse = await fetch(`${API_BASE_URL}/courses/slug/${slug}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
-      });
-
-      if (!slugResponse.ok) {
-        setError('Course not found');
-        setLoading(false);
-        return;
-      }
-
-      const slugData = await slugResponse.json();
-
-      if (!slugData.isEnrolled) {
-        setNotEnrolled(true);
-        setLoading(false);
-        return;
-      }
-
-      const courseId = slugData.course.id;
-
-      // Now fetch full content with the course ID
-      const contentResponse = await fetch(`${API_BASE_URL}/courses/${courseId}/content`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
-      });
-
-      if (!contentResponse.ok) {
-        const errorData = await contentResponse.json();
-        if (errorData.code === 'NOT_ENROLLED') {
-          setNotEnrolled(true);
-        } else {
-          setError(errorData.error || 'Failed to load course content');
-        }
-        setLoading(false);
-        return;
-      }
-
-      const data = await contentResponse.json();
-      setCourse(data.course);
-      setProgress(data.progress || {});
-      setEnrollment(data.enrollment);
-
-      // Set first lesson as current if no lesson selected
-      if (data.course.course_modules?.length > 0) {
-        const firstModule = data.course.course_modules[0];
-        if (firstModule.course_lessons?.length > 0) {
-          setCurrentLesson(firstModule.course_lessons[0]);
-        }
-      }
-
-      setLoading(false);
-    } catch (err) {
-      console.error('Failed to fetch course:', err);
-      setError('Failed to load course content');
-      setLoading(false);
-    }
-  }, [token, slug]);
-
-  // Auth redirect
-  useEffect(() => {
-    if (!authLoading && !isAuthenticated) {
-      router.push(`/login?redirect=/courses/${slug}/learn`);
-    }
-  }, [authLoading, isAuthenticated, router, slug]);
-
-  // Fetch course content
-  useEffect(() => {
-    if (isAuthenticated && token) {
-      fetchCourseContent();
-    }
-  }, [isAuthenticated, token, fetchCourseContent]);
-
-  // Mark lesson as complete
-  const markLessonComplete = async (lessonId: string) => {
-    if (!token || !course) return;
-
-    try {
-      await fetch(`${API_BASE_URL}/courses/${course.id}/progress`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          lessonId,
-          completed: true,
-          progressPercent: 100,
-        }),
-      });
-
-      setProgress(prev => ({
-        ...prev,
-        [lessonId]: {
-          completed: true,
-          progress_percent: 100,
-          last_position: 0,
-        },
-      }));
-    } catch (err) {
-      console.error('Failed to update progress:', err);
-    }
-  };
-
-  // Get all lessons in order
-  const getAllLessons = (): Lesson[] => {
-    if (!course) return [];
-    return course.course_modules.flatMap(m => m.course_lessons);
-  };
-
-  // Navigate lessons
-  const navigateLesson = (direction: 'prev' | 'next') => {
-    const allLessons = getAllLessons();
-    const currentIndex = allLessons.findIndex(l => l.id === currentLesson?.id);
-
-    if (direction === 'prev' && currentIndex > 0) {
-      setCurrentLesson(allLessons[currentIndex - 1]);
-    } else if (direction === 'next' && currentIndex < allLessons.length - 1) {
-      setCurrentLesson(allLessons[currentIndex + 1]);
-    }
-  };
-
-  // Calculate completion percentage
-  const getCompletionPercentage = (): number => {
-    const allLessons = getAllLessons();
-    if (allLessons.length === 0) return 0;
-    const completed = allLessons.filter(l => progress[l.id]?.completed).length;
-    return Math.round((completed / allLessons.length) * 100);
-  };
-
-  // Loading state
-  if (authLoading || loading) {
-    return (
-      <div className="min-h-screen bg-gray-950 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-emerald-500 mx-auto mb-4"></div>
-          <p className="text-gray-400">Loading course content...</p>
-        </div>
-      </div>
-    );
-  }
-
-  // Not enrolled - show locked screen
-  if (notEnrolled) {
-    return (
-      <>
-        <Navbar />
-        <main className="min-h-screen bg-gray-950 pt-24 pb-16">
-          <div className="max-w-2xl mx-auto px-4 text-center">
-            <div className="bg-gray-900/50 border border-gray-800 rounded-2xl p-12">
-              <div className="w-20 h-20 mx-auto bg-gray-800 rounded-full flex items-center justify-center mb-6">
-                <Lock className="w-10 h-10 text-gray-500" />
-              </div>
-
-              <h1 className="text-2xl font-bold text-white mb-4">
-                Course Access Required
-              </h1>
-
-              <p className="text-gray-400 mb-8">
-                You need to be enrolled in this course to access the content.
-                Contact us on Telegram to purchase access.
-              </p>
-
-              {user && (
-                <div className="bg-gray-800/50 border border-gray-700 rounded-lg p-4 mb-8">
-                  <p className="text-sm text-gray-400 mb-1">Your User ID:</p>
-                  <p className="text-xl font-mono font-bold text-emerald-400">{user.user_code}</p>
-                  <p className="text-xs text-gray-500 mt-2">Share this ID when purchasing</p>
-                </div>
-              )}
-
-              <div className="flex flex-col sm:flex-row gap-4 justify-center">
-                <a
-                  href="https://t.me/darwineducation"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center justify-center gap-2 px-6 py-3 bg-[#0088cc] hover:bg-[#0077b5] text-white font-semibold rounded-lg transition-colors"
-                >
-                  <MessageCircle className="w-5 h-5" />
-                  Contact on Telegram
-                </a>
-                <Link
-                  href={`/courses/${slug}`}
-                  className="px-6 py-3 bg-gray-800 hover:bg-gray-700 text-white font-semibold rounded-lg transition-colors"
-                >
-                  View Course Details
-                </Link>
-              </div>
-            </div>
-          </div>
-        </main>
-      </>
-    );
-  }
-
-  // Error state
-  if (error || !course) {
-    return (
-      <>
-        <Navbar />
-        <main className="min-h-screen bg-gray-950 pt-24 pb-16">
-          <div className="max-w-2xl mx-auto px-4 text-center">
-            <div className="bg-gray-900/50 border border-gray-800 rounded-2xl p-12">
-              <h1 className="text-2xl font-bold text-white mb-4">
-                {error || 'Course not found'}
-              </h1>
-              <Link
-                href="/courses"
-                className="text-emerald-500 hover:text-emerald-400"
-              >
-                Browse all courses
-              </Link>
-            </div>
-          </div>
-        </main>
-      </>
-    );
-  }
-
-  const allLessons = getAllLessons();
-  const currentIndex = allLessons.findIndex(l => l.id === currentLesson?.id);
-  const hasPrev = currentIndex > 0;
-  const hasNext = currentIndex < allLessons.length - 1;
-
-  // Prefer an explicit override URL for lesson content videos when available
-  const currentLessonVideoUrl = currentLesson
-    ? LESSON_CONTENT_OVERRIDES[currentLesson.title] ?? currentLesson.video_url
-    : null;
-
-  // ── MIGRATION MODE: show announcement instead of lesson UI ──
-  if (MIGRATION_MODE) {
-    return (
-      <>
-        <Navbar />
-        <main className="min-h-screen bg-gray-950 pt-24 pb-16 flex items-start justify-center">
-          <div className="w-full max-w-xl px-4 mt-4">
-
-            {/* Badge */}
-            <div className="flex justify-center mb-3">
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-widest bg-amber-400/10 border border-amber-400/30 text-amber-300">
-                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse inline-block" />
-                Website Migrated
-              </span>
-            </div>
-
-            <div className="rounded-2xl border border-emerald-500/40 bg-gradient-to-br from-emerald-950/50 via-gray-900/70 to-gray-900/50 p-6 sm:p-10 shadow-xl shadow-emerald-900/20 relative overflow-hidden">
-              {/* Top glow line */}
-              <div className="absolute top-0 left-1/2 -translate-x-1/2 w-56 h-px bg-gradient-to-r from-transparent via-emerald-400 to-transparent" />
-              {/* Ambient glow */}
-              <div className="absolute -top-20 -right-20 w-56 h-56 rounded-full bg-emerald-500/5 blur-3xl pointer-events-none" />
-
-              {/* Header */}
-              <div className="flex items-start gap-4 mb-6">
-                <div className="w-14 h-14 rounded-2xl bg-emerald-500/15 border border-emerald-500/25 flex items-center justify-center flex-shrink-0">
-                  <span className="text-3xl leading-none">🚀</span>
-                </div>
-                <div>
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-emerald-400/70 mb-1">Announcement</p>
-                  <h1 className="text-xl sm:text-2xl font-bold text-white leading-tight">New Course Website Available</h1>
-                  <p className="text-sm text-gray-300 mt-1.5 leading-relaxed">
-                    We now have a new website for course access.
-                  </p>
-                </div>
-              </div>
-
-              {/* CTA Button */}
-              <a
-                href="https://pesles.vercel.app"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center justify-center gap-2 w-full py-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 active:bg-emerald-600 text-gray-950 font-bold text-base transition-all duration-200 shadow-lg shadow-emerald-900/40 hover:shadow-emerald-700/50 mb-5 group"
-              >
-                <span>Go to New Website</span>
-                <svg className="w-4 h-4 transition-transform group-hover:translate-x-0.5" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" /></svg>
-              </a>
-
-              {/* Highlighted link */}
-              <div className="mb-6 flex items-center gap-2 px-3 py-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
-                <svg className="w-4 h-4 text-emerald-400 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m13.35-.622l1.757-1.757a4.5 4.5 0 00-6.364-6.364l-4.5 4.5a4.5 4.5 0 001.242 7.244" /></svg>
-                <a
-                  href="https://pesles.vercel.app"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-emerald-300 font-semibold text-sm sm:text-base hover:text-emerald-200 underline underline-offset-2 break-all"
-                >
-                  https://pesles.vercel.app
-                </a>
-              </div>
-
-              {/* Steps */}
-              <div className="mb-6">
-                <p className="text-xs font-semibold text-gray-500 uppercase tracking-widest mb-3">How to get started</p>
-                <ol className="space-y-3">
-                  <li className="flex items-start gap-3 text-sm text-gray-300">
-                    <span className="flex-shrink-0 w-6 h-6 rounded-full bg-gray-800 border border-gray-700 flex items-center justify-center text-[11px] font-bold text-emerald-400 mt-0.5">1</span>
-                    <span>
-                      Just log in using your account at{' '}
-                      <a href="https://pilis.onrender.com" className="text-emerald-400 underline underline-offset-2 hover:text-emerald-300 font-medium" target="_blank" rel="noopener noreferrer">pilis.onrender.com</a>
-                    </span>
-                  </li>
-                  <li className="flex items-start gap-3 text-sm text-gray-300">
-                    <span className="flex-shrink-0 w-6 h-6 rounded-full bg-gray-800 border border-gray-700 flex items-center justify-center text-[11px] font-bold text-emerald-400 mt-0.5">2</span>
-                    <span>The system will automatically detect your account and log you in.</span>
-                  </li>
-                  <li className="flex items-start gap-3 text-sm text-gray-300">
-                    <span className="flex-shrink-0 w-6 h-6 rounded-full bg-gray-800 border border-gray-700 flex items-center justify-center text-[11px] font-bold text-emerald-400 mt-0.5">3</span>
-                    <span>
-                      After logging in, go to <span className="text-white font-semibold">Profile Settings</span> and connect your Discord account.
-                    </span>
-                  </li>
-                </ol>
-              </div>
-
-              {/* Support */}
-              <div className="pt-4 border-t border-gray-700/60 text-center">
-                <p className="text-sm text-gray-400">
-                  Account denied or experiencing issues? Message Telegram support:
-                </p>
-                <a
-                  href="https://t.me/centssupport"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 mt-2 text-sky-400 hover:text-sky-300 font-bold text-base"
-                >
-                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.562 8.247-1.97 9.289c-.145.658-.537.818-1.084.508l-3-2.21-1.447 1.394c-.16.16-.295.295-.605.295l.213-3.053 5.56-5.023c.242-.213-.054-.333-.373-.12L8.12 14.026l-2.96-.924c-.643-.204-.657-.643.136-.953l11.547-4.453c.537-.194 1.006.131.72.551z"/></svg>
-                  @centssupport
-                </a>
-              </div>
-            </div>
-
-            {/* Back to profile link */}
-            <div className="mt-6 text-center">
-              <a href="/profile" className="text-sm text-gray-500 hover:text-gray-400 underline underline-offset-2">
-                ← Back to Profile
-              </a>
-            </div>
-          </div>
-        </main>
-      </>
-    );
-  }
-
   return (
     <div className="h-screen bg-gray-950 flex overflow-hidden">
       {/* Sidebar */}
@@ -1412,9 +518,9 @@ export default function CourseLearnPage() {
         <div className="h-full flex flex-col">
           {/* Header */}
           <div className="p-4 border-b border-gray-800">
-            <Link href="/profile" className="text-sm text-emerald-500 hover:text-emerald-400 flex items-center gap-1 mb-4">
+            <Link href="/" className="text-sm text-emerald-500 hover:text-emerald-400 flex items-center gap-1 mb-4">
               <ChevronLeft className="w-4 h-4" />
-              Back to Profile
+              Back to Home
             </Link>
 
             {/* Tabs */}
@@ -1486,13 +592,14 @@ export default function CourseLearnPage() {
                   {LESSON_VIDEOS.map((lesson) => {
                     const isCurrent = currentVideoLesson?.id === lesson.id;
                     const isUnlocked = isLessonUnlocked(lesson.id);
+                    const isCompleted = completedLessons.has(lesson.id);
 
                     return (
                       <li key={lesson.id}>
                         <button
                           onClick={() => {
                             if (isUnlocked) {
-                              setCurrentVideoLesson(lesson);
+                              openLesson(lesson);
                             }
                           }}
                           disabled={!isUnlocked}
@@ -1504,7 +611,11 @@ export default function CourseLearnPage() {
                             }`}
                         >
                           {isUnlocked ? (
-                            <Play className="w-4 h-4 flex-shrink-0" />
+                            isCompleted ? (
+                              <CheckCircle className="w-4 h-4 flex-shrink-0 text-emerald-500" />
+                            ) : (
+                              <Play className="w-4 h-4 flex-shrink-0" />
+                            )
                           ) : (
                             <Lock className="w-4 h-4 flex-shrink-0 text-gray-600" />
                           )}
@@ -1578,7 +689,7 @@ export default function CourseLearnPage() {
 
           <div className="flex-1 min-w-0">
             <h1 className="font-semibold text-white truncate">
-              {activeTab === 'files' ? 'Course Files' : activeTab === 'bgm' ? 'BGM and SFX' : activeTab === 'webinar' ? 'Webinar Archive' : currentVideoLesson ? `${currentVideoLesson.title}` : currentLesson?.title || 'Select a lesson'}
+              {activeTab === 'files' ? 'Course Files' : activeTab === 'bgm' ? 'BGM and SFX' : activeTab === 'webinar' ? 'Webinar Archive' : currentVideoLesson ? `${currentVideoLesson.title}` : 'Select a lesson'}
             </h1>
           </div>
 
@@ -1595,10 +706,10 @@ export default function CourseLearnPage() {
           </a>
 
           <Link
-            href="/profile"
+            href="/"
             className="text-sm text-gray-400 hover:text-white"
           >
-            {user?.user_code}
+            Home
           </Link>
         </header>
 
@@ -1795,8 +906,14 @@ export default function CourseLearnPage() {
 
             {/* Lesson info */}
             <div className="mb-6">
-              <h2 className="text-2xl font-bold text-white mb-2">
+              <h2 className="text-2xl font-bold text-white mb-2 flex items-center gap-3">
                 {currentVideoLesson.title}
+                {completedLessons.has(currentVideoLesson.id) && (
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 border border-emerald-500/30 text-emerald-400">
+                    <CheckCircle className="w-3.5 h-3.5" />
+                    Completed
+                  </span>
+                )}
               </h2>
               <div className="flex items-center gap-4 text-gray-400">
               </div>
@@ -1884,80 +1001,6 @@ export default function CourseLearnPage() {
 
 
           </div>
-        ) : currentLesson && activeTab === 'lessons' ? (
-          <div className="p-6 lg:p-8 max-w-4xl mx-auto">
-            {/* Video player placeholder (supports explicit public URL overrides) */}
-            {currentLessonVideoUrl && (
-              <div className="aspect-video bg-gray-900 rounded-xl mb-8 flex items-center justify-center">
-                <video
-                  src={currentLessonVideoUrl}
-                  controls
-                  controlsList="nodownload"
-                  onContextMenu={(e) => e.preventDefault()}
-                  className="w-full h-full rounded-xl"
-                  poster={`${currentLessonVideoUrl}?poster=true`}
-                />
-              </div>
-            )}
-
-            {/* Lesson info */}
-            <div className="flex items-center gap-4 text-gray-400 mb-6">
-              <span className="flex items-center gap-1">
-                <BookOpen className="w-4 h-4" />
-                {currentLesson.lesson_type}
-              </span>
-            </div>
-
-            {/* Lesson content */}
-            <div className="prose prose-invert prose-gray max-w-none mb-8">
-              <div
-                className="text-gray-300"
-                dangerouslySetInnerHTML={{ __html: currentLesson.content || '' }}
-              />
-            </div>
-
-            {/* Resources */}
-            {currentLesson.resources && currentLesson.resources.length > 0 && (
-              <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-6 mb-8">
-                <h3 className="font-semibold text-white mb-4">Resources</h3>
-                <ul className="space-y-2">
-                  {currentLesson.resources.map((resource, index) => (
-                    <li key={index}>
-                      <a
-                        href={resource.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-emerald-500 hover:text-emerald-400"
-                      >
-                        {resource.name || resource.url}
-                      </a>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {/* Navigation buttons */}
-            <div className="flex items-center justify-between border-t border-gray-800 pt-6">
-              <button
-                onClick={() => navigateLesson('prev')}
-                disabled={!hasPrev}
-                className="flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <ChevronLeft className="w-4 h-4" />
-                Previous
-              </button>
-
-              <button
-                onClick={() => navigateLesson('next')}
-                disabled={!hasNext}
-                className="flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                Next
-                <ChevronRight className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
         ) : (
           <div className="p-6 lg:p-8">
             {/* Show search bar based on active tab */}
@@ -2005,7 +1048,7 @@ export default function CourseLearnPage() {
                 {lessonCategory === 'HISTORY' && filteredLessons.length === 0 ? (
                   <div className="flex flex-col items-center justify-center py-20 text-center">
                     <div className="w-16 h-16 rounded-full bg-gray-800 flex items-center justify-center mb-4">
-                      <span className="text-3xl">Ã°Å¸â€¢â€™</span>
+                      <span className="text-3xl">🎬</span>
                     </div>
                     <p className="text-gray-400 font-medium mb-1">No watch history yet</p>
                     <p className="text-gray-600 text-sm">Start watching lessons and they'll appear here.</p>
@@ -2014,6 +1057,7 @@ export default function CourseLearnPage() {
                   <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
                     {filteredLessons.map((lesson) => {
                       const isUnlocked = isLessonUnlocked(lesson.id);
+                      const isCompleted = completedLessons.has(lesson.id);
                       const histEntry = watchHistory[String(lesson.id)];
                       const progress = histEntry?.duration
                         ? Math.min((histEntry.currentTime / histEntry.duration) * 100, 100)
@@ -2025,7 +1069,7 @@ export default function CourseLearnPage() {
                           key={lesson.id}
                           onClick={() => {
                             if (isUnlocked) {
-                              setCurrentVideoLesson(lesson);
+                              openLesson(lesson);
                             }
                           }}
                           className={`bg-gray-900 border border-gray-800 rounded-xl overflow-hidden transition-all ${isUnlocked
@@ -2049,13 +1093,19 @@ export default function CourseLearnPage() {
                                     <Play className="w-8 h-8 text-white ml-1" />
                                   </div>
                                 </div>
-                                {/* Red progress bar at bottom of card */}
-                                {progress > 0 && (
+                                {/* Progress bar at bottom of card (green when completed) */}
+                                {isCompleted || progress > 0 ? (
                                   <div className="absolute bottom-0 left-0 right-0 h-1 bg-gray-700">
                                     <div
-                                      className="h-full bg-red-500 transition-all duration-300"
-                                      style={{ width: `${progress}%` }}
+                                      className={`h-full transition-all duration-300 ${isCompleted ? 'bg-emerald-500' : 'bg-red-500'}`}
+                                      style={{ width: isCompleted ? '100%' : `${progress}%` }}
                                     />
+                                  </div>
+                                ) : null}
+                                {/* Completed badge */}
+                                {isCompleted && (
+                                  <div className="absolute top-2 right-2 w-7 h-7 rounded-full bg-emerald-500/90 flex items-center justify-center">
+                                    <CheckCircle className="w-4 h-4 text-white" />
                                   </div>
                                 )}
                               </>
@@ -2327,12 +1377,12 @@ export default function CourseLearnPage() {
               </div>
             )}
 
-            {activeTab === 'lessons' && !currentVideoLesson && !currentLesson && (
+            {activeTab === 'lessons' && !currentVideoLesson && (
               <div className="flex flex-col items-center justify-center h-[50vh] gap-4">
                 <BookOpen className="w-16 h-16 text-gray-600" />
                 <p className="text-gray-500 text-lg">Select a lesson to begin</p>
                 <button
-                  onClick={() => setCurrentVideoLesson(LESSON_VIDEOS[0])}
+                  onClick={() => openLesson(LESSON_VIDEOS[0])}
                   className="px-6 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-lg transition-colors"
                 >
                   Start with Lesson 1
@@ -2346,3 +1396,19 @@ export default function CourseLearnPage() {
   );
 }
 
+export default function CourseLearnPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-gray-950 flex items-center justify-center">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-emerald-500 mx-auto mb-4"></div>
+            <p className="text-gray-400">Loading course content...</p>
+          </div>
+        </div>
+      }
+    >
+      <CourseLearnPageContent />
+    </Suspense>
+  );
+}

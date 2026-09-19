@@ -25,11 +25,6 @@ const nextConfig = {
     minimumCacheTTL: 31536000, // 1 year cache for optimized images
   },
 
-  // Environment variables
-  env: {
-    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api',
-  },
-
   // Performance optimizations
   reactStrictMode: true,
   
@@ -48,7 +43,7 @@ const nextConfig = {
   // Enable experimental features for better performance
   experimental: {
     // Optimize package imports to reduce bundle size
-    optimizePackageImports: ['lucide-react', 'framer-motion'],
+    optimizePackageImports: ['lucide-react'],
   },
 };
 

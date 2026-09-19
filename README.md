@@ -1,53 +1,19 @@
-# Darwin Education Platform
+# Pislis — Personal Course Website
 
-A modern educational course platform with manual enrollment verification and secure access links.
+A private, personal course website for the **Faceless Facebook Mastery** course.
 
-## Project Structure
+No accounts, no login, no backend. Open the site and start learning — progress is
+saved in your browser (localStorage).
 
-```
-Darwin Website/
-├── frontend/          # Next.js frontend application
-│   ├── src/
-│   │   ├── app/       # Next.js app router pages
-│   │   └── components/ # Reusable React components
-│   └── package.json
-│
-├── backend/           # Node.js/Express API server
-│   ├── src/
-│   │   ├── routes/    # API route handlers
-│   │   ├── middleware/ # Auth middleware
-│   │   └── config/    # Database & email config
-│   ├── database/      # SQL schema for Supabase
-│   └── package.json
-│
-└── README.md
-```
+## Tech Stack
 
-## Features
-
-### Frontend (Next.js)
-- 🎨 Dark green aesthetic theme (responsive design)
-- 📚 Course listing and filtering
-- 📝 Enrollment form with payment proof upload
-- 🔐 Secure course access via token links
-- 👨‍💼 Admin dashboard for enrollment management
-- 🔑 Password setup for first-time access
-
-### Backend (Node.js/Express)
-- 🔒 JWT-based authentication
-- 📧 Email notifications (enrollment confirmation, access links)
-- 🎫 Secure token generation for course access
-- 📊 Admin API for enrollment management
-- 🗄️ Supabase database integration
+- **Frontend**: Next.js 14 (App Router, TypeScript), Tailwind CSS, Lucide Icons, @vimeo/player
+- **Output**: Static export (`output: 'export'`) — deployable to any static host (Vercel, Netlify, GitHub Pages, Render static, …)
+- **Videos**: Vimeo (embedded), Cloudinary and Cloudflare R2 (direct MP4 URLs)
+- **Files / BGM**: served locally from `frontend/public/`
+- **Progress**: browser localStorage (no database)
 
 ## Getting Started
-
-### Prerequisites
-- Node.js 18+
-- npm or yarn
-- Supabase account
-
-### Frontend Setup
 
 ```bash
 cd frontend
@@ -55,130 +21,69 @@ npm install
 npm run dev
 ```
 
-The frontend will run on http://localhost:3000
+Open http://localhost:3000 — the course home loads directly, no login.
 
-### Backend Setup
+### Production Build
 
-1. Copy the environment file:
 ```bash
-cd backend
-cp .env.example .env
+cd frontend
+npm run build   # outputs a fully static site to frontend/out
 ```
 
-2. Update `.env` with your credentials:
-```env
-SUPABASE_URL=your_supabase_url
-SUPABASE_SERVICE_KEY=your_service_key
-JWT_SECRET=your_secret_key
-SMTP_HOST=smtp.gmail.com
-SMTP_USER=your_email
-SMTP_PASS=your_app_password
-```
-
-3. Install dependencies and start:
-```bash
-npm install
-npm run dev
-```
-
-The API will run on http://localhost:5000
-
-### Database Setup (Supabase)
-
-1. Create a new Supabase project
-2. Go to SQL Editor
-3. Run the SQL in `backend/database/schema.sql`
-4. Copy your Supabase URL and keys to `.env`
+Deploy the contents of `frontend/out/` to any static host.
 
 ## Pages
 
 | Route | Description |
 |-------|-------------|
-| `/` | Homepage with hero, featured courses, testimonials |
-| `/courses` | Browse all courses with filters |
-| `/enroll` | Enrollment form with payment upload |
-| `/admin` | Admin dashboard for managing enrollments |
-| `/access/[token]` | Course content access page |
+| `/` | Course home — course card, overall progress, resume last lesson |
+| `/courses/fb-automation-mastery/learn` | Course interface — lessons, files, BGM & SFX, webinar archive |
+| `/courses/fb-automation-mastery/learn?lesson=<id>` | Open/resume a specific lesson |
+| `/courses` | Redirects to `/` |
+| `/courses/[slug]` | Redirects to the course learn page |
+| `/privacy`, `/terms` | Legal pages |
 
-## API Endpoints
+## How Course Progress Works
 
-### Public
-- `GET /api/courses` - List all courses
-- `GET /api/courses/:id` - Get course details
-- `POST /api/enrollments` - Submit enrollment
-- `GET /api/enrollments/verify/:token` - Verify access token
+Everything is stored locally in the browser (per device, no account):
 
-### Protected (Auth Required)
-- `POST /api/auth/register` - Register user
-- `POST /api/auth/login` - Login user
-- `GET /api/auth/me` - Get current user
+| Data | localStorage key |
+|------|------------------|
+| Watch position per lesson (resume where you left off) | `ffm_watch_history` |
+| Completed lessons (video watched to the end) | `ffm_completed_lessons` |
+| Last opened lesson (shown on the course home) | `ffm_last_lesson` |
 
-### Admin Only
-- `GET /api/admin/enrollments` - List all enrollments
-- `POST /api/admin/enrollments/:id/approve` - Approve enrollment
-- `POST /api/admin/enrollments/:id/reject` - Reject enrollment
-- `POST /api/admin/enrollments/:id/resend-link` - Resend access email
-- `GET /api/admin/stats` - Dashboard statistics
-
-## Security Features
-
-1. **Token-Based Access**
-   - Unique 32-character tokens per enrollment
-   - Configurable expiration (default 1 year)
-   - One-time password setup on first access
-
-2. **Device/Session Management**
-   - Device fingerprint tracking
-   - Concurrent session limits (configurable)
-   - Session activity logging
-
-3. **Payment Verification**
-   - Manual admin review of payment proofs
-   - Transaction ID tracking (prevents duplicates)
-   - Audit trail for all approvals/rejections
-
-4. **Link Protection**
-   - Email tied to specific token
-   - Access revocation capability
-   - Suspicious activity detection
+Legacy per-user keys from the old auth system (`ffm_watch_history_<userId>`) are
+automatically merged into the single key on first load.
 
 ## Environment Variables
 
-### Frontend (.env.local)
-```env
-NEXT_PUBLIC_API_URL=http://localhost:5000/api
-```
+All are **optional** — working defaults are built into the code.
+Copy `frontend/.env.example` to `frontend/.env.local` to override.
 
-### Backend (.env)
-```env
-PORT=5000
-NODE_ENV=development
-SUPABASE_URL=your_supabase_url
-SUPABASE_SERVICE_KEY=your_service_key
-JWT_SECRET=your_jwt_secret
-JWT_EXPIRES_IN=7d
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-SMTP_USER=your_email@gmail.com
-SMTP_PASS=your_app_password
-FROM_EMAIL=noreply@darwin.edu
-FROM_NAME=Darwin Education
-FRONTEND_URL=http://localhost:3000
-ADMIN_EMAIL=admin@darwin.edu
-```
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME` | `dwcxvaswf` | Cloudinary cloud for lesson video URLs |
+| `NEXT_PUBLIC_R2_LESSONS_BASE_URL` | `https://pub-79bbe5625f3e4375a961f7bf776b47c8.r2.dev` | R2 public bucket for lesson videos |
 
-## Demo Credentials
+## Course Content
 
-Admin Dashboard:
-- Email: `admin@darwin.edu`
-- Password: `admin123`
+The curriculum (lesson list, video sources, categories, resources, external
+links) lives in `frontend/src/data/lessons.ts`. Lesson video routing
+(Cloudinary vs R2) is defined in `frontend/src/data/video-sources.json`.
 
-## Tech Stack
+Supporting media:
 
-- **Frontend**: Next.js 14, React 18, Tailwind CSS, Lucide Icons
-- **Backend**: Node.js, Express, JWT
-- **Database**: Supabase (PostgreSQL)
-- **Email**: Nodemailer
+- `frontend/public/thumbnails/` — lesson thumbnails
+- `frontend/public/files/` — downloadable course files
+- `frontend/public/bgm-and-sfx/` — BGM/SFX audio
+- `frontend/public/data/files.json` — file list for the Files tab
+
+Media management scripts (Cloudinary asset listing/b-roll generation) are in the
+repository root: `fetch-lessons.js`, `list-all-assets.js`, `generate-brolls.js`,
+`generate-homepage-videos.js`, `delete-brolls.js`.
+
+See `CLOUDINARY_SETUP.md` and `R2_CORS_SETUP.md` for media hosting setup.
 
 ## License
 
