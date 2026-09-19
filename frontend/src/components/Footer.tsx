@@ -2,17 +2,15 @@
 
 import Link from 'next/link';
 import { BookOpen, Facebook, Instagram } from 'lucide-react';
-import { useAuth } from '@/contexts/AuthContext';
 
 const Footer = () => {
-  const { isAuthenticated } = useAuth();
   return (
     <footer className="bg-dark-500 border-t border-primary-900/30">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-12">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8 lg:gap-12">
           {/* Brand */}
           <div className="space-y-4">
-            <Link href={isAuthenticated ? '/profile' : '/login'} className="flex items-center space-x-2">
+            <Link href="/" className="flex items-center space-x-2">
               <div className="w-10 h-10 bg-primary-500 rounded-lg flex items-center justify-center">
                 <BookOpen className="w-6 h-6 text-white" />
               </div>
@@ -37,8 +35,13 @@ const Footer = () => {
             <h4 className="text-white font-semibold mb-4">Quick Links</h4>
             <ul className="space-y-2">
               <li>
-                <Link href={isAuthenticated ? '/profile' : '/login'} className="text-gray-400 hover:text-primary-400 transition-colors text-sm">
-                  {isAuthenticated ? 'Profile' : 'Log In'}
+                <Link href="/" className="text-gray-400 hover:text-primary-400 transition-colors text-sm">
+                  Home
+                </Link>
+              </li>
+              <li>
+                <Link href="/courses/fb-automation-mastery/learn" className="text-gray-400 hover:text-primary-400 transition-colors text-sm">
+                  My Course
                 </Link>
               </li>
             </ul>

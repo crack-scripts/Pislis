@@ -33,10 +33,6 @@ yarn-error.log*
 Thumbs.db
 desktop.ini
 
-# Uploads (user-generated content)
-backend/uploads/payment-proofs/*
-!backend/uploads/payment-proofs/.gitkeep
-
 # Large video files - DO NOT COMMIT (hosted on Cloudinary + R2)
 frontend/public/Lessons/**/*.mp4
 frontend/public/b-rolls/**/*.mp4

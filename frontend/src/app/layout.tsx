@@ -1,20 +1,28 @@
 import type { Metadata, Viewport } from 'next';
 import './globals.css';
-import { AuthProvider } from '@/contexts/AuthContext';
-import MaintenanceGate from '@/components/MaintenanceGate';
 
-// Preload critical fonts
-import { Inter, Playfair_Display } from 'next/font/google';
+// Self-hosted fonts (Inter + Playfair Display) — no external font CDN needed
+import localFont from 'next/font/local';
 
-const inter = Inter({
-  subsets: ['latin'],
+const inter = localFont({
+  src: [
+    { path: './fonts/inter-latin-400-normal.woff2', weight: '400', style: 'normal' },
+    { path: './fonts/inter-latin-500-normal.woff2', weight: '500', style: 'normal' },
+    { path: './fonts/inter-latin-600-normal.woff2', weight: '600', style: 'normal' },
+    { path: './fonts/inter-latin-700-normal.woff2', weight: '700', style: 'normal' },
+  ],
   display: 'swap',
   variable: '--font-inter',
   preload: true,
 });
 
-const playfairDisplay = Playfair_Display({
-  subsets: ['latin'],
+const playfairDisplay = localFont({
+  src: [
+    { path: './fonts/playfair-display-latin-400-normal.woff2', weight: '400', style: 'normal' },
+    { path: './fonts/playfair-display-latin-500-normal.woff2', weight: '500', style: 'normal' },
+    { path: './fonts/playfair-display-latin-600-normal.woff2', weight: '600', style: 'normal' },
+    { path: './fonts/playfair-display-latin-700-normal.woff2', weight: '700', style: 'normal' },
+  ],
   display: 'swap',
   variable: '--font-display',
   preload: true,
@@ -75,19 +83,8 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className={`${inter.variable} ${playfairDisplay.variable}`}>
-      <head>
-        {/* DNS prefetch for external resources */}
-        <link rel="dns-prefetch" href="//fonts.googleapis.com" />
-        <link rel="dns-prefetch" href="//fonts.gstatic.com" />
-        {/* Preconnect to API */}
-        <link rel="preconnect" href={process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'} />
-      </head>
       <body className="antialiased font-sans">
-        <AuthProvider>
-          <MaintenanceGate>
-            {children}
-          </MaintenanceGate>
-        </AuthProvider>
+        {children}
       </body>
     </html>
   );

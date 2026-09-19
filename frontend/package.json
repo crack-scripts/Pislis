@@ -10,14 +10,10 @@
   },
   "dependencies": {
     "@vimeo/player": "^2.30.3",
-    "axios": "^1.6.2",
-    "framer-motion": "^10.16.16",
     "lucide-react": "^0.294.0",
     "next": "^14.0.4",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "react-is": "^19.2.6",
-    "recharts": "^3.8.1"
+    "react-dom": "^18.2.0"
   },
   "devDependencies": {
     "@types/node": "^20.10.5",

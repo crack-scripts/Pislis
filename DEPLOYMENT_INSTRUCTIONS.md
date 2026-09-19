@@ -1,65 +1,36 @@
 # Deployment Instructions
 
-## 🚀 Quick Fix for "Route not found" Error
+The site is a **static Next.js export** — there is no backend to deploy.
 
-### Vercel Environment Variables (Frontend)
+## Build
 
-Go to: **Vercel Dashboard → Your Project → Settings → Environment Variables**
-
-Add these variables:
-
-1. **Backend API URL:**
-   - Key: `NEXT_PUBLIC_API_URL`
-   - Value: `https://pislis-backend.onrender.com/api`
-   - Environment: Production, Preview, Development
-
-2. **Cloudinary Cloud Name:**
-   - Key: `NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME`
-   - Value: `Your actual Cloudinary cloud name from https://cloudinary.com/console`
-   - Environment: Production, Preview, Development
-
-After adding these, click **"Redeploy"** to apply the changes.
-
----
-
-## Backend Deployment (Render)
-
-### Environment Variables to Set:
-
-```env
-PORT=5000
-NODE_ENV=production
-
-# Supabase (from your Supabase dashboard)
-SUPABASE_URL=your_supabase_url
-SUPABASE_ANON_KEY=your_anon_key
-SUPABASE_SERVICE_KEY=your_service_key
-
-# JWT Secret (generate a strong random string)
-JWT_SECRET=your_jwt_secret_here
-JWT_EXPIRES_IN=7d
-
-# Frontend URL (Vercel deployment URL)
-FRONTEND_URL=https://pislis.vercel.app
-
-# Email configuration (optional - for sending enrollment emails)
-EMAIL_USER=your_email@gmail.com
-EMAIL_PASS=your_app_password
+```bash
+cd frontend
+npm install
+npm run build
 ```
 
----
+The production site is generated in `frontend/out/`.
 
-## Troubleshooting
+## Deploy to Vercel
 
-### CORS Errors
-- Ensure `FRONTEND_URL` in Render matches your Vercel domain exactly
-- Backend CORS is configured to allow: localhost:3000, pislis.vercel.app
+1. Import the repository in Vercel.
+2. Set **Root Directory** to `frontend` (framework auto-detected: Next.js).
+3. No environment variables are required (defaults are built in).
+   To use a different Cloudinary cloud, set `NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME`.
+4. Deploy. The build output is the static `out/` directory.
 
-### Videos Not Loading
-- Check Cloudinary cloud name is set correctly in Vercel
-- Verify videos are uploaded to Cloudinary with correct folder structure
+## Deploy Anywhere Else
 
-### Login Issues
-- Ensure `NEXT_PUBLIC_API_URL` points to your Render backend
-- Check backend is running and accessible
-- Test API health check: https://pislis-backend.onrender.com/api/health
+Upload the contents of `frontend/out/` to any static host
+(Netlify, GitHub Pages, Render static site, Cloudflare Pages, S3 + CloudFront, …).
+
+## Notes
+
+- **Videos**: lesson videos are hosted on Cloudinary, Cloudflare R2, and Vimeo —
+  they load from their public URLs and are not affected by where the site is hosted.
+- **Progress**: stored in each visitor's browser localStorage. Clearing site data
+  in the browser resets progress on that device.
+- **Troubleshooting video load failures**: check that
+  `NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME` matches your Cloudinary cloud, and that the
+  lesson MP4 exists under `darwin-education/lessons/` (see `CLOUDINARY_SETUP.md`).
